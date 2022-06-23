@@ -4,7 +4,8 @@ const express = require('express');
 const ejs = require('ejs');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
-const md5 = require('md5');
+const bcrypt = require('bcrypt');
+const saltRounds = 10;
 
 
 
@@ -74,35 +75,37 @@ app.get("/:username/secrets", (req, res) => {
 
 
 
-app.post("/login", (req, res) => {
-  User.findOne({ email: req.body.username }, (err, foundUser) => {
-    if (err) console.log(err);
-    else {
-      if (foundUser) {
-        if (foundUser.password === md5(req.body.password))
-          res.redirect(`/${req.body.username}/secrets`);
+
+app.post("/register", (req, res) => {
+  bcrypt.hash(req.body.password, saltRounds, (err, hash) => {
+    User.findOne({ email: req.body.username }, (err, foundUser) => {
+      if (err) console.log(err);
+      else if (foundUser) res.send("This email has already been registered.");
+      else {
+        const newAccount = new User({
+          email: req.body.username,
+          password: hash,
+          secrets: [],
+        });
+        newAccount.save();
+        res.redirect(`/${req.body.username}/secrets`);
       }
-    }
+    })
   })
 })
 
 
 
 
-
-app.post("/register", (req, res) => {
+app.post("/login", (req, res) => {
   User.findOne({ email: req.body.username }, (err, foundUser) => {
     if (err) console.log(err);
-    else if (foundUser) res.send("This email has already been registered.");
     else {
-      const newAccount = new User({
-        email: req.body.username,
-        password: md5(req.body.password),
-        secrets: [],
-      });
-
-      newAccount.save();
-      res.redirect(`/${req.body.username}/secrets`);
+      if (foundUser) {
+        bcrypt.compare(req.body.password, foundUser.password, (err, result) => {
+          if (result) res.redirect(`/${req.body.username}/secrets`);;
+        })
+      }
     }
   })
 })
