@@ -4,8 +4,9 @@ const express = require('express');
 const ejs = require('ejs');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
-const bcrypt = require('bcrypt');
-const saltRounds = 10;
+const session = require('express-session');
+const passport = require('passport');
+const passportLocalMongoose = require('passport-local-mongoose');
 
 
 
@@ -15,23 +16,20 @@ const app = express();
 
 
 
+app.set("view engine", "ejs");
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
-app.set("view engine", "ejs");
+app.use(session({
+  secret: "Our Little Secret",
+  resave: false,
+  saveUninitialized: false
+}));
+app.use(passport.initialize());
+app.use(passport.session());
 
 
 
-
-mongoose.connect("mongodb://localhost:27017/userDB", { useNewUrlParser: true });
-
-
-
-
-const secretSchema = new mongoose.Schema({
-  content: String,
-})
-
-const Secret = mongoose.model("Secret", secretSchema);
+mongoose.connect("mongodb://localhost:27017/userDB", { useNewUrlParser: true, });
 
 
 
@@ -39,16 +37,26 @@ const Secret = mongoose.model("Secret", secretSchema);
 const userSchema = new mongoose.Schema({
   email: String,
   password: String,
-  secrets: [secretSchema]
+  // secrets: [secretSchema]
 });
 
+userSchema.plugin(passportLocalMongoose);
+
 const User = mongoose.model('User', userSchema);
+
+passport.use(User.createStrategy());
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
+
 
 
 
 
 app.get("/", (req, res) => {
-  res.render("home");
+  if (req.isAuthenticated())
+    res.redirect("/secrets");
+  else
+    res.render("home");
 })
 
 
@@ -68,8 +76,10 @@ app.get("/register", (req, res) => {
 
 
 
-app.get("/:username/secrets", (req, res) => {
-  res.render("secrets", { username: req.params.username });
+app.get("/secrets", (req, res) => {
+  if (req.isAuthenticated())
+    res.render("secrets");
+  else res.redirect("/login");
 })
 
 
@@ -77,67 +87,47 @@ app.get("/:username/secrets", (req, res) => {
 
 
 app.post("/register", (req, res) => {
-  bcrypt.hash(req.body.password, saltRounds, (err, hash) => {
-    User.findOne({ email: req.body.username }, (err, foundUser) => {
-      if (err) console.log(err);
-      else if (foundUser) res.send("This email has already been registered.");
-      else {
-        const newAccount = new User({
-          email: req.body.username,
-          password: hash,
-          secrets: [],
-        });
-        newAccount.save();
-        res.redirect(`/${req.body.username}/secrets`);
-      }
-    })
-  })
+  User.register({ username: req.body.username }, req.body.password, (err, user) => {
+    if (err) {
+      console.log(err);
+      res.redirect("/register");
+    } else {
+      passport.authenticate("local")(req, res, () => {
+        res.redirect("/secrets");
+      })
+    }
+  });
 })
 
 
 
 
 app.post("/login", (req, res) => {
-  User.findOne({ email: req.body.username }, (err, foundUser) => {
+
+  const user = new User({
+    username: req.body.username,
+    password: req.body.password
+  });
+
+  req.login(user, (err) => {
     if (err) console.log(err);
     else {
-      if (foundUser) {
-        bcrypt.compare(req.body.password, foundUser.password, (err, result) => {
-          if (result) res.redirect(`/${req.body.username}/secrets`);;
-        })
-      }
+      passport.authenticate("local")(req, res, () => {
+        res.redirect("/secrets");
+      })
     }
+
   })
 })
 
 
 
 
-app.route("/:username/submit")
-
-  .get((req, res) => {
-    res.render("submit", { username: req.params.username })
-  })
-
-  .post((req, res) => {
-    const newSecret = new Secret({
-      content: req.body.secret
-    })
-    User.findOne({ email: req.params.username }, (err, foundUser) => {
-      if (err) console.log(err);
-      else {
-        foundUser.secrets.push(newSecret);
-        foundUser.save();
-      }
-    })
-    res.redirect(`/${req.params.username}/secrets`)
-  })
-
-
-
-
 app.get("/logout", (req, res) => {
-  res.redirect("/");
+  req.logout((err) => {
+    if (err) { return next(err); }
+    res.redirect('/');
+  });
 })
 
 
